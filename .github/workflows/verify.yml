@@ -1,0 +1,36 @@
+name: Build and smoke test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore
+      - run: dotnet build --configuration Release --no-restore
+      - name: Smoke test the public health endpoint
+        env:
+          API_TOKEN: ci-smoke-test-token
+        run: |
+          dotnet run --configuration Release --no-build --urls http://127.0.0.1:5000 > /tmp/user-management-api.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:5000/ > /tmp/health.json; then
+              grep -q '"status":"running"' /tmp/health.json
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/user-management-api.log
+          exit 1
